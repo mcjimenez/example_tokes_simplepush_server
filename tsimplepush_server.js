@@ -2,29 +2,8 @@
 // It doesn't keep anything persistent, everything goes the way of the dodo
 // when the server is shut down. Tough luck.
 
-'use strict';
-
 // Take a guess :P
 var serverPort = 8123;
-
-function PathMatcher(regex, fn) {
-
-  var regExp = new RegExp(regex);
-  var processMethod = fn;
-  
-  function matches(path) {
-    if (regExp.test(path)) {
-      return processMethod; 
-    } else {
-      return undefined;
-    }
-  }
-
-  return {
-    matches: matches
-  }
-}
-
 
 // What we offer:
 //   * GET /about that just says hey, mom, it's me
@@ -39,6 +18,10 @@ function PathMatcher(regex, fn) {
 //     parameter: 
 //        * endpoint = endpoint said friend must use to reach him
 function TPushServer(serverPort) {
+  'use strict';
+
+  // The in-memory friend list
+  var friends = require('./friends.js').Friends();
 
   function debug() {
     console.log.apply(console,arguments);
@@ -47,6 +30,8 @@ function TPushServer(serverPort) {
   var http = require('http');
   var urlParser = require('url');
   var httpServer = null;
+
+  var PathMatcher = require('./pathMatcher.js').PathMatcher;
 
   // The order is important, they get evaluated on a top-down basis and the first one that maches wins
   var serverPaths = {
@@ -62,25 +47,47 @@ function TPushServer(serverPort) {
     'OPTIONS': {
       '*': new PathMatcher ('.*', doOptions)
     },
+    'DELETE': {
+      '/friend': new PathMatcher('^/friend/.+/.+(/.*)?$', deleteFriend),
+      '*': new PathMatcher('.*', goAway.bind(undefined, 403))
+    },
     'DEFAULT': {
       '*': new PathMatcher('.*', goAway.bind(undefined, 404))
     }
   }
 
+  function allowCORS(aReq, aRes) {
+    // Always allow CORS!!!
+    if (aReq.headers.origin) {
+      aRes.setHeader("Access-Control-Allow-Origin","*");
+    }
 
-  function processRequest(req, res) {
-    var method = req.method;
-    var pathname = urlParser.parse(req.url).pathname;
+    // Lets be VERY promiscuous... just don't do that on any serious server
+    aRes.setHeader("Access-Control-Allow-Methods", "PUT, GET, OPTIONS");
+    aRes.setHeader("Access-Control-Allow-Origin", "*");
+
+    // If the request has Access-Control-Request-Headers headers, we should answer with an 
+    // Access-Control-Allow-Headers...
+    var rh = aReq.headers["access-control-request-headers"];
+    if (rh) { // We don't really care much about this...
+      aRes.setHeader("Access-Control-Allow-Headers", rh);
+    }
+  }
+
+  function returnData(aRes, aStatusCode, aResult, aContentType) {
+    aRes.statusCode = aStatusCode;
+    aRes.setHeader("Content-Length", aResult.length);
+    aRes.setHeader("Content-Type", aContentType);
+    aRes.end(aResult);
+  }
+
+  function processRequest(aReq, aRes) {
+    var method = aReq.method;
+    var pathname = urlParser.parse(aReq.url).pathname;
 
     debug("Got a %s request!", method);
-    debug("Headers: %s", JSON.stringify(req.headers));
-    debug("Req: %s, %s", pathname, req.url);
-
-
-    // Always allow CORS!!!
-    if (req.headers.origin) {
-      res.setHeader("Access-Control-Allow-Origin","*");
-    }
+    debug("Headers: %s", JSON.stringify(aReq.headers));
+    debug("Req: %s, %s", pathname, aReq.url);
 
     var methodPaths = serverPaths[method] || serverPaths['DEFAULT'];
     var fn = undefined;
@@ -90,9 +97,10 @@ function TPushServer(serverPort) {
         break;
     }
     if (fn) {
-      fn(req, res, pathname);
+      allowCORS(aReq, aRes);
+      fn(aReq, aRes, pathname);
     } else {
-      goAway(404, req, res, pathname);
+      goAway(404, aReq, aRes, pathname);
     }
 
   }
@@ -104,96 +112,75 @@ function TPushServer(serverPort) {
   }
 
 
-  function goAway(retCode, req, res, pathname) {
-    res.statusCode = retCode || 404; 
-    res.end();
-    
+  function goAway(aRetCode, aReq, aRes, aPathname) {
+    returnData(aRes, aRetCode || 404, "", "text/html");
   }
+
+
+  function doModification(aPathname, aSuccessCallback, aFailureCallback) {
+    var pathComponents = aPathname.split('/');
+    var nick = decodeURIComponent(pathComponents[2]);
+    var friend = decodeURIComponent(pathComponents[3]);
+    debug("Modify Friend Friend. Nick: %s, Friend: %s", nick, friend);
+    if (nick && friend) {
+      aSuccessCallback(nick, friend);
+    } else {
+      aFailureCallback();
+    }
+  }
+
 
   //   * PUT /friend/nick/aFriend will PUT aFriend as friend of nick. It must have one
   //     parameter: 
   //        * endpoint = endpoint said friend must use to reach him
   //   * PUT any other thing -> Go away
-  function putFriend(req, res, pathname) {
-    var pathComponents = pathname.split('/');
-    var nick = decodeURIComponent(pathComponents[2]);
-    var friend = decodeURIComponent(pathComponents[3]);
-    debug("Put Friend. Nick: %s, Friend: %s", nick, friend);
-    if (nick && friend) {
-      res.statusCode = 200;
-      req.on('readable', function () {
-        req.setEncoding('ascii');
-        var endpoint = req.read();
-        storeNewFriend(nick, friend, endpoint, res);
-      });
-    } else {
-      goAway(404,req,res);
-    }
-    
+  function putFriend(aReq, aRes, aPathname) {
+    doModification(aPathname, 
+      function (aNick, aFriend) {
+        aReq.on('readable', function () {
+                 aReq.setEncoding('ascii');
+                 var endpoint = aReq.read();
+                 storeNewFriend(aNick, aFriend, endpoint, aRes);
+               });
+      }, goAway.bind(undefined, 404, aReq, aRes));
   }
 
-  function doOptions(req, res, pathname) {
-    console.log("OPTIONS, WTF is this?");
-    // Let's be promiscuous
-    res.setHeader("Content-Length", 0);
-    res.setHeader("Access-Control-Allow-Methods", "PUT, GET, OPTIONS");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-
-    res.statusCode = 200;
-    res.end();
+  //   * DELETE /friend/nick/aFriend will DELETE aFriend as friend of nick. It doesn't need parameters
+  //   * DELETE any other thing -> Go away
+  function deleteFriend(aReq, aRes, aPathname) {
+    doModification(aPathname, 
+      function (aNick, aFriend) {
+        friends.eraseFriend(aNick, aFriend);
+        returnData(aRes, 200, "{}", "application/json");
+      }, goAway.bind(undefined, 404, aReq, aRes));
   }
 
-
-  // This will keep the list of people we know about...
-  var people=[];
-
-  function getPeopleIKnow(me) {
-    return people[me] || [];
+  function doOptions(aReq, aRes, aPathname) {
+    // Not much to do here really since CORS is already taken care of
+    returnData(res, 200, "", "text/html");
   }
-
-  // Every 'person' will be a...
-  function updateFriendInfo(nick, friend, endpoint) {
-    if (!people[nick]) {
-      people[nick] = [];
-    }
-    var found = 0;
-    for(var i in people[nick]) {
-      if (people[nick][i].nick === friend) {
-        found = true;
-        people[nick][i].endpoint = endpoint;
-        break;
-      }
-    }
-    if (!found)
-      people[nick].push({nick: friend, endpoint: endpoint});
-  }
-
-  function storeNewFriend(nick, friend, endpoint, res) {
-    debug("storeNewFriend: %s", nick, friend, endpoint);
-    var params = require('querystring').parse(endpoint);
-    var result = "{}";
-    if (params.endpoint) {
-      updateFriendInfo(nick, friend, params.endpoint);
-    } else {
-      res.statusCode = 500;
-      result = "{error: 'Invalid parameters'}";
-    }
-    res.setHeader("Content-Length",result.length);
-    res.setHeader("Content-Type","application/json");
-    res.end(result);
-  }
-
-  var aboutPage = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>About TSimplePush</title></head><body><h1>About</h1><p>This a example server for exchanging SimplePush Endpoints.</p><p>If you don't know what that is then maybe you should not be here</p></body></html>";
-
 
   // Returns a nice HTML about page
-  function getAboutPage(req, res, pathname) {
+  function getAboutPage(aReq, aRes, aPathname) {
     debug("aboutPage");
-    res.setHeader("Content-Type", "text/html");
-    res.setHeader("Content-Length", aboutPage.length);
-    res.end(aboutPage);
-    
+    var aboutPage = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>About TSimplePush</title></head><body><h1>About</h1><p>This a example server for exchanging SimplePush Endpoints.</p><p>If you don't know what that is then maybe you should not be here</p></body></html>";
+    returnData(aRes, 200, aboutPage, "text/html");
   }
+
+  function storeNewFriend(aNick, aFriend, aEndpoint, aRes) {
+    debug("storeNewFriend: %s, %s, %s", aNick, aFriend, aEndpoint);
+    var params = require('querystring').parse(aEndpoint);
+    var result = "{}";
+    var statusCode = 200;
+    if (params.endpoint) {
+      friends.updateFriendInfo(aNick, aFriend, params.endpoint);
+    } else {
+      statusCode = 500;
+      result = "{error: 'Invalid parameters'}";
+    }
+    returnData(aRes, statusCode, result, "application/json");
+  }
+
 
   // returns the JSON with the friends of whoAmI. To sum up, that's 
   //     We will return a nice JSON that has an array of:
@@ -201,27 +188,20 @@ function TPushServer(serverPort) {
   //         nick: 'each of the friends of myself',
   //         endpoint: 'endpoint where we can reach said friend'
   //       }
-  function getFriends(req, res, pathname) {
-// TO-DO....
-
-    var whoAmI = decodeURIComponent((pathname.split('/'))[2]);
-    debug("getFriends: %s: %s", pathname, whoAmI);
+  function getFriends(aReq, aRes, aPathname) {
+    var whoAmI = decodeURIComponent((aPathname.split('/'))[2]);
+    debug("getFriends: %s: %s", aPathname, whoAmI);
 
     if (whoAmI) {
-      var body = JSON.stringify(getPeopleIKnow(whoAmI));
-      res.setHeader('Content-Length', body.length);
-      res.setHeader('Content-Type', 'application/json');
-      res.statusCode = 200;
-      res.end(body);
+      returnData(aRes, 200, JSON.stringify(friends.getPeopleIKnow(whoAmI)), "application/json");
     } else {
-      goAway(500, req, res);
+      goAway(500, aReq, aRes);
     }
   }
 
 
   return {
     start: start
-    
   }
 
 };
