@@ -157,7 +157,7 @@ function TPushServer(serverPort) {
 
   function doOptions(aReq, aRes, aPathname) {
     // Not much to do here really since CORS is already taken care of
-    returnData(res, 200, "", "text/html");
+    returnData(aRes, 200, "", "text/html");
   }
 
   // Returns a nice HTML about page
