@@ -63,7 +63,7 @@ function TPushServer(serverPort) {
     }
 
     // Lets be VERY promiscuous... just don't do that on any serious server
-    aRes.setHeader("Access-Control-Allow-Methods", "PUT, GET, OPTIONS");
+    aRes.setHeader("Access-Control-Allow-Methods", "PUT, GET, OPTIONS, DELETE");
     aRes.setHeader("Access-Control-Allow-Origin", "*");
 
     // If the request has Access-Control-Request-Headers headers, we should answer with an 
