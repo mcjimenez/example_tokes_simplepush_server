@@ -36,23 +36,23 @@ function TPushServer(serverPort) {
   // The order is important, they get evaluated on a top-down basis and the first one that maches wins
   var serverPaths = {
     'GET': {
-      '/about': new PathMatcher('^/about(/.*)?$', getAboutPage), 
-      '/friend': new PathMatcher('^/friend/', getFriends), 
-      '*': new PathMatcher('.*', goAway.bind(undefined, 404))
+      '/about': PathMatcher('^/about(/.*)?$', getAboutPage), 
+      '/friend': PathMatcher('^/friend/', getFriends), 
+      '*': PathMatcher('.*', goAway.bind(undefined, 404))
     },
     'PUT': {
-      '/friend': new PathMatcher('^/friend/.+/.+(/.*)?$', putFriend),
-      '*': new PathMatcher('.*', goAway.bind(undefined, 403))
+      '/friend': PathMatcher('^/friend/.+/.+(/.*)?$', putFriend),
+      '*': PathMatcher('.*', goAway.bind(undefined, 403))
     },
     'OPTIONS': {
-      '*': new PathMatcher ('.*', doOptions)
+      '*': PathMatcher ('.*', doOptions)
     },
     'DELETE': {
-      '/friend': new PathMatcher('^/friend/.+/.+(/.*)?$', deleteFriend),
-      '*': new PathMatcher('.*', goAway.bind(undefined, 403))
+      '/friend': PathMatcher('^/friend/.+/.+(/.*)?$', deleteFriend),
+      '*': PathMatcher('.*', goAway.bind(undefined, 403))
     },
     'DEFAULT': {
-      '*': new PathMatcher('.*', goAway.bind(undefined, 404))
+      '*': PathMatcher('.*', goAway.bind(undefined, 404))
     }
   }
 
